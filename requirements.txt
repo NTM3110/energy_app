@@ -1,0 +1,8 @@
+sqlalchemy>=2.0
+pyserial
+psycopg2-binary
+celery
+redis
+click
+uvicorn[standard]
+fastapi

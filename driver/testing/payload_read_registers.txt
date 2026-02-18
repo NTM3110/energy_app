@@ -1,0 +1,4 @@
+bao@bao-desktop-home:~/Desktop/AT/EDMI-PYTHON$ python3 testing/login_answer.py --port /dev/ttyUSB1 --baud 9600
+RX1 (5 bytes): 2f 3f 21 0d 0a
+TX  (16 bytes): 02 45 01 2b 16 68 0e fa aa 45 ff ff 06 ee 8c 03
+RX2 (112 bytes): 02 45 0e fa aa 45 01 2b 16 68 ff ff 4c 45 44 4d 49 2c 49 4d 44 45 49 4d 44 45 00 84 15 03 02 45 0e fa aa 45 01 2b 16 68 ff ff 4d 00 00 ff f1 00 00 e0 00 00 00 e0 01 00 00 e0 10 42 00 00 f7 01 00 00 f7 10 43 00 00 e0 10 50 00 00 e0 10 51 00 00 e0 12 00 00 f7 00 00 00 f7 10 42 00 00 e0 26 00 00 e0 60 00 00 01 69 00 00 10 43 69 3c ae 03
