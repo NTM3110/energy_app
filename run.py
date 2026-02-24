@@ -8,7 +8,8 @@ import signal
 import socket
 
 from app.db import Base, engine, SessionLocal
-from model.models import Meter, MeterReading, IntervalState
+from model.models import Meter, MeterReading, IntervalState, EnergySite, EnergySource
+from model.models import User
 from app.interval_state_builder import build_interval_state
 from app.period_builder import build_periods
 from app.monthly_aggregator import build_monthly_summary
@@ -45,51 +46,88 @@ def init_db():
 
 def ensure_meters(db):
     """
-    Create demo meters if they do not exist.
-    Required meters (11 total):
-      - 4 BESS sources
-      - 4 RTS (solar) sources
-      - 1 SELF meter
-      - 1 GRID meter
-      - 1 INTERCONNECT meter
+    Create demo sites, sources, and meters if they do not exist.
+      - 2 EnergySites: factory + destination
+      - 2 EnergySources: BESS + RTS
+      - 11 Meters (4 BESS, 4 RTS, 1 SELF_USE, 1 GRID_POINT, 1 INTERCONNECT)
     """
 
+    # --- default owner ---
+    default_user = db.query(User).first()
+    if not default_user:
+        default_user = User(name="admin", password_hash="hash")
+        db.add(default_user)
+        db.commit()
+
+    # --- energy sites ---
+    factory = db.query(EnergySite).filter_by(type="ENERGY_FACTORY").first()
+    if not factory:
+        factory = EnergySite(name="Energy Factory", type="ENERGY_FACTORY")
+        db.add(factory)
+
+    dest = db.query(EnergySite).filter_by(type="DEST_FACTORY").first()
+    if not dest:
+        dest = EnergySite(name="Destination Factory", type="DEST_FACTORY")
+        db.add(dest)
+
+    db.flush()  # get IDs before using them
+
+    # --- energy sources ---
+    bess = db.query(EnergySource).filter_by(name="BESS").first()
+    if not bess:
+        bess = EnergySource(name="BESS", cost_per_kwh=0.12)
+        db.add(bess)
+
+    rts = db.query(EnergySource).filter_by(name="RTS").first()
+    if not rts:
+        rts = EnergySource(name="RTS", cost_per_kwh=0.05)
+        db.add(rts)
+
+    db.flush()
+
+    # --- meters ---
+    # (serial_number, role, source, site, meter_name)
     meter_defs = [
-        # -------- BESS --------
-        ("BESS_01", "SOURCE", 1),
-        ("BESS_02", "SOURCE", 1),
-        ("BESS_03", "SOURCE", 1),
-        ("BESS_04", "SOURCE", 1),
-
-        # -------- RTS / SOLAR --------
-        ("SOLAR_01", "SOURCE", 2),
-        ("SOLAR_02", "SOURCE", 2),
-        ("SOLAR_03", "SOURCE", 2),
-        ("SOLAR_04", "SOURCE", 2),
-
-        # -------- Others --------
-        ("SELF_01", "SELF_USE", None),
-        ("GRID_01", "GRID_POINT", None),
-        ("DEST_01", "INTERCONNECT", None),
+        (253319561, "SOURCE",       bess, factory, "BESS_01"),
+        (253319562, "SOURCE",       bess, factory, "BESS_02"),
+        (253319563, "SOURCE",       bess, factory, "BESS_03"),
+        (253319564, "SOURCE",       bess, factory, "BESS_04"),
+        (253319565, "SOURCE",       rts,  factory, "SOLAR_01"),
+        (253319566, "SOURCE",       rts,  factory, "SOLAR_02"),
+        (253319567, "SOURCE",       rts,  factory, "SOLAR_03"),
+        (253319568, "SOURCE",       rts,  factory, "SOLAR_04"),
+        (253319569, "SELF_USE",     None, factory, "SELF_01"),
+        (253319570, "GRID_POINT",   None, factory, "GRID_01"),
+        (253319571, "INTERCONNECT", None, dest,    "DEST_01"),
     ]
 
     created = 0
-
-    for serial, role, source_id in meter_defs:
+    for serial, role, source, site, meter_name in meter_defs:
         exists = db.query(Meter).filter_by(serial_number=serial).first()
         if not exists:
             db.add(Meter(
                 serial_number=serial,
                 role=role,
-                source_id=source_id,
+                source_id=source.id if source else None,
+                site_id=site.id,
+                meter_name=meter_name,
+                username="EDMI",
+                password="IMDEIMDE",
+                outstation=12,
+                type="EDMI",
+                model="Mk6E",
+                owner_id=default_user.id,
             ))
             created += 1
 
+    db.commit()
+
     if created:
-        db.commit()
         print(f"✔ Created {created} demo meters")
     else:
         print("✔ Demo meters already exist")
+
+
 
 
 # -------------------------------------------------------------------
@@ -202,7 +240,7 @@ def process_interval(db, rows, ts):
 
     for row in rows:
         meter = db.query(Meter).filter_by(
-            serial_number=row["meter_serial"]
+            meter_name=row["meter_serial"]
         ).first()
 
         if not meter:
@@ -397,7 +435,6 @@ def start_server() -> int:
     # EDMI used 'app:app'. energy_app has 'main:app' in start_server (step 41).
     # energy_app/main.py exists (step 12).
     # So 'main:app' is likely correct for energy_app API.
-    
     cmd = Cmd(
         uvicorn=("uvicorn", "main:app", "--host", host, "--port", str(port), "--reload"),
         celery=(

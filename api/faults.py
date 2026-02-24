@@ -14,6 +14,7 @@ router = APIRouter()
 class FaultInfo(BaseModel):
     meter_id: int
     meter_serial: str
+    meter_name: Optional[str] = None
     fault_start_ts: datetime
     fault_end_ts: Optional[datetime]
 
@@ -70,7 +71,8 @@ def get_faults_by_month(
                 faults=[
                     FaultInfo(
                         meter_id=m.id,
-                        meter_serial=m.serial_number,
+                        meter_serial=str(m.serial_number),
+                        meter_name=m.meter_name,
                         fault_start_ts=s.fault_start_ts,
                         fault_end_ts=s.fault_end_ts,
                     )
@@ -119,7 +121,8 @@ def get_faults_by_window_time(
             faults=[
                 FaultInfo(
                     meter_id=m.id,
-                    meter_serial=m.serial_number,
+                    meter_serial=str(m.serial_number),
+                    meter_name=m.meter_name,
                     fault_start_ts=s.fault_start_ts,
                     fault_end_ts=s.fault_end_ts,
                 )

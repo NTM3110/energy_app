@@ -174,13 +174,44 @@ class User(Base):
     )
 
 
+class EnergySite(Base):
+    __tablename__ = "energy_sites"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(100), nullable=False)
+    type = Column(String(50), nullable=False)
+
+    meters = relationship(
+        "Meter",
+        back_populates="site",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+
+class EnergySource(Base):
+    __tablename__ = "energy_sources"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(100), nullable=False)
+    cost_per_kwh = Column(Float, nullable=False)
+
+    meters = relationship(
+        "Meter",
+        back_populates="source",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+
 class Meter(Base):
     __tablename__ = "meters"
 
     id = Column(Integer, primary_key=True)
     serial_number = Column(Integer, nullable=False, unique=True)
     role = Column(String, nullable=True)  # SOURCE / SELF_USE / GRID_POINT / INTERCONNECT
-    source_id = Column(Integer, nullable=True)  # 1=BESS, 2=RFS
+    source_id = Column(Integer, ForeignKey("energy_sources.id", ondelete="SET NULL"), nullable=True)  # 1=BESS, 2=RTS
+    site_id = Column(Integer, ForeignKey("energy_sites.id", ondelete="SET NULL"), nullable=True)
     username = Column(String(100), nullable=False)
     password = Column(String(100), nullable=False)
     meter_name = Column(String(100), nullable=True)
@@ -191,6 +222,8 @@ class Meter(Base):
     owner_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
 
     owner = relationship("User", back_populates="meters")
+    site = relationship("EnergySite", back_populates="meters")
+    source = relationship("EnergySource", back_populates="meters")
 
     reading_values = relationship(
         "ReadingValue",

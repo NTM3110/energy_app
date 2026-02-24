@@ -24,11 +24,11 @@ class Keys:
     meter_status_seq_prefix: str = "edmi_app:celery:meter_status_seq"
 
     # Scheduler state (replaces ad-hoc IPC flags)
-    scheduler_loop_task_id: str = "edmi_app:scheduler:loop_task_id"
-    scheduler_loop_control: str = "edmi_app:scheduler:loop_control"
-    scheduler_loop_state: str = "edmi_app:scheduler:loop_state"
-    scheduler_loop_priority: str = "edmi_app:scheduler:loop_priority"
-    scheduler_queue: str = "edmi_app:scheduler:queue"
+    scheduler_loop_task_id_prefix: str = "edmi_app:scheduler:loop_task_id"
+    scheduler_loop_control_prefix: str = "edmi_app:scheduler:loop_control"
+    scheduler_loop_state_prefix: str = "edmi_app:scheduler:loop_state"
+    scheduler_loop_priority_prefix: str = "edmi_app:scheduler:loop_priority"
+    scheduler_queue_prefix: str = "edmi_app:scheduler:queue"
     scheduler_task_prefix: str = "edmi_app:scheduler:task"
     scheduler_task_result_prefix: str = "edmi_app:scheduler:task_result"
     scheduler_prelogin_done_prefix: str = "edmi_app:scheduler:prelogin_done"

@@ -31,6 +31,11 @@ class ReadProfileBody(BaseModel):
     survey: str
     from_datetime: date
     to_datetime: date
+    max_records: int | None = None
+
+class ReadProfileLoopBody(BaseModel):
+    meters_id_list: list[int]
+    survey: str = "LS02"
 
 class AddMeterRequestBody(BaseModel):
     serial_number: int = Field(..., description="Meter serial number")

@@ -58,9 +58,10 @@ class ScheduledTask:
 
 
 class TaskScheduler:
-    def __init__(self, r: redis.Redis, keys: Keys) -> None:
+    def __init__(self, r: redis.Redis, keys: Keys, loop_name: str = "meter") -> None:
         self.r = r
         self.keys = keys
+        self.loop_name = loop_name
 
     def _now_iso(self) -> str:
         return datetime.now(timezone.utc).isoformat()
@@ -80,6 +81,21 @@ class TaskScheduler:
     def _prelogin_done_key(self, task_id: str) -> str:
         return f"{self.keys.scheduler_prelogin_done_prefix}:{task_id}"
 
+    def _queue_key(self) -> str:
+        return f"{self.keys.scheduler_queue_prefix}:{self.loop_name}"
+
+    def _loop_task_id_key(self) -> str:
+        return f"{self.keys.scheduler_loop_task_id_prefix}:{self.loop_name}"
+
+    def _loop_control_key(self) -> str:
+        return f"{self.keys.scheduler_loop_control_prefix}:{self.loop_name}"
+
+    def _loop_state_key(self) -> str:
+        return f"{self.keys.scheduler_loop_state_prefix}:{self.loop_name}"
+
+    def _loop_priority_key(self) -> str:
+        return f"{self.keys.scheduler_loop_priority_prefix}:{self.loop_name}"
+
     def _load_task(self, task_id: str) -> dict[str, Any] | None:
         raw = self.r.get(self._task_key(task_id))
         if not raw:
@@ -93,25 +109,25 @@ class TaskScheduler:
         self.r.set(self._task_key(task_id), json.dumps(payload, separators=(",", ":")))
 
     def get_loop_task_id(self) -> str | None:
-        return self.r.get(self.keys.scheduler_loop_task_id)
+        return self.r.get(self._loop_task_id_key())
 
     def set_loop_control(self, control: str) -> None:
-        self.r.set(self.keys.scheduler_loop_control, control)
+        self.r.set(self._loop_control_key(), control)
 
     def get_loop_control(self) -> str:
-        return self.r.get(self.keys.scheduler_loop_control) or LoopControl.RUN
+        return self.r.get(self._loop_control_key()) or LoopControl.RUN
 
     def set_loop_state(self, state: str) -> None:
-        self.r.set(self.keys.scheduler_loop_state, state)
+        self.r.set(self._loop_state_key(), state)
 
     def get_loop_state(self) -> str:
-        return self.r.get(self.keys.scheduler_loop_state) or LoopState.STOPPED
+        return self.r.get(self._loop_state_key()) or LoopState.STOPPED
 
     def set_loop_priority(self, priority: int) -> None:
-        self.r.set(self.keys.scheduler_loop_priority, str(priority))
+        self.r.set(self._loop_priority_key(), str(priority))
 
     def get_loop_priority(self) -> int:
-        raw = self.r.get(self.keys.scheduler_loop_priority)
+        raw = self.r.get(self._loop_priority_key())
         if raw is None:
             return 0
         try:
@@ -120,7 +136,7 @@ class TaskScheduler:
             return 0
 
     def register_loop_task(self, task_id: str, *, priority: int) -> bool:
-        if self.r.setnx(self.keys.scheduler_loop_task_id, task_id):
+        if self.r.setnx(self._loop_task_id_key(), task_id):
             self.set_loop_control(LoopControl.RUN)
             self.set_loop_state(LoopState.STARTING)
             self.set_loop_priority(priority)
@@ -128,13 +144,13 @@ class TaskScheduler:
         return False
 
     def force_register_loop_task(self, task_id: str, *, priority: int) -> None:
-        self.r.set(self.keys.scheduler_loop_task_id, task_id)
+        self.r.set(self._loop_task_id_key(), task_id)
         self.set_loop_control(LoopControl.RUN)
         self.set_loop_state(LoopState.STARTING)
         self.set_loop_priority(priority)
 
     def clear_loop_task(self) -> None:
-        self.r.delete(self.keys.scheduler_loop_task_id)
+        self.r.delete(self._loop_task_id_key())
 
     def stop_loop(self) -> str | None:
         task_id = self.get_loop_task_id()
@@ -174,7 +190,7 @@ class TaskScheduler:
         self._save_task(task_id, task)
 
         score = float(priority) * 1_000_000_000.0 + time.time()
-        self.r.zadd(self.keys.scheduler_queue, {task_id: score})
+        self.r.zadd(self._queue_key(), {task_id: score})
         return task_id
 
     def has_pending_task(self, name: str) -> bool:
@@ -182,27 +198,27 @@ class TaskScheduler:
         return self.r.exists(lock_key) == 1
 
     def has_runnable_task(self, *, max_priority: int) -> bool:
-        task_ids = self.r.zrange(self.keys.scheduler_queue, 0, 0)
+        task_ids = self.r.zrange(self._queue_key(), 0, 0)
         if not task_ids:
             return False
         task = self._load_task(task_ids[0])
         if not task:
-            self.r.zrem(self.keys.scheduler_queue, task_ids[0])
+            self.r.zrem(self._queue_key(), task_ids[0])
             return False
         return int(task.get("priority", 0)) <= max_priority
 
     def claim_next_task(self, *, max_priority: int) -> dict[str, Any] | None:
-        task_ids = self.r.zrange(self.keys.scheduler_queue, 0, 0)
+        task_ids = self.r.zrange(self._queue_key(), 0, 0)
         if not task_ids:
             return None
         task_id = task_ids[0]
         task = self._load_task(task_id)
         if not task:
-            self.r.zrem(self.keys.scheduler_queue, task_id)
+            self.r.zrem(self._queue_key(), task_id)
             return None
         if int(task.get("priority", 0)) > max_priority:
             return None
-        if self.r.zrem(self.keys.scheduler_queue, task_id) == 0:
+        if self.r.zrem(self._queue_key(), task_id) == 0:
             return None
         task["state"] = TaskState.RUNNING
         task["started_at"] = self._now_iso()
@@ -230,7 +246,7 @@ class TaskScheduler:
         self.r.set(self._task_result_key(task_id), json.dumps({"status": "error", "error": error}))
 
     def cancel_task(self, task_id: str) -> None:
-        self.r.zrem(self.keys.scheduler_queue, task_id)
+        self.r.zrem(self._queue_key(), task_id)
         task = self._load_task(task_id)
         if task:
             task["state"] = TaskState.CANCELLED

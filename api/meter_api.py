@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from background_service.celery_app import celery_app
 from background_service.state import Keys
 from background_service.scheduler import TaskScheduler
-from schema.meter import ReadMetersBody, ReadProfileBody
+from schema.meter import ReadMetersBody, ReadProfileBody, ReadProfileLoopBody
 from driver.interface.edmi_structs import EDMISurvey
 from model.models import Meter
 from runtime_settings import REDIS_URL
@@ -354,6 +354,173 @@ async def test_login_meters(request: Request, body: ReadMetersBody):
 
 
 
+@router.post("/read_and_save_profile_loop_streaming_status")
+async def read_and_save_profile_loop_streaming_status(request: Request, body: ReadProfileLoopBody):
+    r = _redis()
+    keys = Keys()
+    # Unique loop_name so it doesn't conflict with main reading loop
+    scheduler = TaskScheduler(r, keys, loop_name="profile")
+    engine = request.app.state.engine
+
+    with Session(engine) as session:
+        meters = (
+            session.query(Meter)
+            .filter(Meter.id.in_(body.meters_id_list))
+            .all()
+        )
+
+    existing_ids = {m.id for m in meters}
+    if not existing_ids:
+        async def _empty_stream():
+            payload = {
+                "status": "No ID available",
+                "task_id": None,
+                "available_ids": None,
+                "functional_ids": [],
+                "meter_status": [],
+            }
+            yield _format_sse(None, "status", payload)
+
+        return StreamingResponse(
+            _empty_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+            },
+        )
+
+    existing_task_id = scheduler.get_loop_task_id()
+    if existing_task_id:
+        functional_ids = scheduler.get_prelogin_result(existing_task_id) or []
+        task_id = existing_task_id
+        start_payload = {
+            "status": "Already running",
+            "task_id": task_id,
+            "available_ids": list(existing_ids),
+            "functional_ids": functional_ids if isinstance(functional_ids, list) else [],
+            "meter_status": [],
+        }
+    else:
+        task_id = uuid.uuid4().hex
+        if not scheduler.register_loop_task(task_id, priority=0):
+            existing_task_id = scheduler.get_loop_task_id()
+            functional_ids = scheduler.get_prelogin_result(existing_task_id) if existing_task_id else []
+            start_payload = {
+                "status": "Already running",
+                "task_id": existing_task_id,
+                "available_ids": list(existing_ids),
+                "functional_ids": functional_ids if isinstance(functional_ids, list) else [],
+                "meter_status": [],
+            }
+        else:
+            async_result = celery_app.send_task(
+                "read_and_save_profile_loop_streaming_status",
+                kwargs={"meter_ids": list(existing_ids), "survey": body.survey},
+                task_id=task_id,
+            )
+            task_id = async_result.id
+
+            functional_ids = await scheduler.wait_prelogin_result(
+                task_id,
+                timeout_s=20.0,
+            )
+
+            if functional_ids is None:
+                start_payload = {
+                    "status": "started_but_prelogin_timeout",
+                    "task_id": task_id,
+                    "available_ids": list(existing_ids),
+                    "functional_ids": None,
+                    "meter_status": [],
+                }
+            else:
+                start_payload = {
+                    "status": "started",
+                    "task_id": task_id,
+                    "available_ids": list(existing_ids),
+                    "functional_ids": functional_ids,
+                    "meter_status": [],
+                }
+
+    last_event_id = _parse_last_event_id(request)
+    channel = _meter_status_channel_key(keys, task_id)
+    list_key = _meter_status_list_key(keys, task_id)
+    latest = _load_event(r.lindex(list_key, -1))
+    if latest:
+        data = latest.get("data", {})
+        if isinstance(data, dict) and "meter_status" in data:
+            start_payload["meter_status"] = data.get("meter_status") or []
+
+    async def _stream():
+        yield _format_sse(None, "status", start_payload)
+
+        backlog = r.lrange(list_key, 0, -1)
+        current_last_id = last_event_id
+        for raw in backlog:
+            event = _load_event(raw)
+            if not event:
+                continue
+            event_id = event.get("id", 0)
+            if event_id <= current_last_id:
+                continue
+            yield _format_sse(event_id, event.get("event"), event.get("data", {}))
+            current_last_id = event_id
+
+        pubsub = r.pubsub(ignore_subscribe_messages=True)
+        pubsub.subscribe(channel)
+        last_ping = time.time()
+        try:
+            while True:
+                msg = await asyncio.to_thread(pubsub.get_message, timeout=1.0)
+                if msg:
+                    event = _load_event(msg.get("data"))
+                    if not event:
+                        continue
+                    event_id = event.get("id", 0)
+                    if event_id <= current_last_id:
+                        continue
+                    yield _format_sse(event_id, event.get("event"), event.get("data", {}))
+                    current_last_id = event_id
+                    last_ping = time.time()
+                else:
+                    if time.time() - last_ping > 30:
+                        yield ": keep-alive\n\n"
+                        last_ping = time.time()
+        except asyncio.CancelledError:
+            pass
+        finally:
+            try:
+                pubsub.unsubscribe(channel)
+            except Exception:
+                pass
+            try:
+                pubsub.close()
+            except Exception:
+                pass
+
+    return StreamingResponse(
+        _stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
+    )
+
+@router.get("/read_and_save_profile_loop_stop")
+async def read_and_save_profile_loop_stop(request: Request):
+    r = _redis()
+    keys = Keys()
+    scheduler = TaskScheduler(r, keys, loop_name="profile")
+
+    task_id = scheduler.stop_loop()
+    if not task_id:
+        return JSONResponse({"status": "not_running", "task_id": None})
+
+    return JSONResponse({"status": "stopping", "task_id": task_id})
+
+
 @router.get("/read_and_save_meters_loop_stop")
 async def read_and_save_meters_loop_stop(request: Request):
     """
@@ -414,7 +581,13 @@ async def read_profile(request: Request, body: ReadProfileBody):
     }.get(survey_enum, 0)
     from_dt = datetime.combine(body.from_datetime, dt_time(0, 0, 0)) + timedelta(seconds=survey_interval_seconds)
     to_dt = datetime.combine(body.to_datetime, dt_time(0, 0, 0)) + timedelta(days=1)
-
+    print("From_dt: ", from_dt.isoformat())
+    print("To_dt: ", to_dt.isoformat())
+    print("Survey: ", survey_enum)
+    print("Meter ID: ", body.meter_id)
+    print("Serial Number: ", meter.serial_number)
+    print("Username: ", meter.username)
+    print("Password: ", meter.password)
     existing_task_id = scheduler.get_loop_task_id()
     if not existing_task_id:
         async_result = celery_app.send_task(

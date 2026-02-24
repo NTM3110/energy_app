@@ -132,19 +132,19 @@ def get_interval_raw_csv(
             mr.ts,
 
             -- BESS
-            SUM(mr.import_kwh) FILTER (WHERE m.serial_number = 'BESS_01') AS bess_1_import,
-            SUM(mr.import_kwh) FILTER (WHERE m.serial_number = 'BESS_02') AS bess_2_import,
-            SUM(mr.export_kwh) FILTER (WHERE m.serial_number = 'BESS_01') AS bess_1_export,
-            SUM(mr.export_kwh) FILTER (WHERE m.serial_number = 'BESS_02') AS bess_2_export,
-            SUM(mr.export_kwh) FILTER (WHERE m.serial_number = 'BESS_03') AS bess_3_export,
-            SUM(mr.import_kwh) FILTER (WHERE m.serial_number = 'BESS_03') AS bess_3_import,
-            SUM(mr.export_kwh) FILTER (WHERE m.serial_number = 'BESS_04') AS bess_4_export,
-            SUM(mr.import_kwh) FILTER (WHERE m.serial_number = 'BESS_04') AS bess_4_import,
+            SUM(mr.import_kwh) FILTER (WHERE m.meter_name = 'BESS_01') AS bess_1_import,
+            SUM(mr.import_kwh) FILTER (WHERE m.meter_name = 'BESS_02') AS bess_2_import,
+            SUM(mr.export_kwh) FILTER (WHERE m.meter_name = 'BESS_01') AS bess_1_export,
+            SUM(mr.export_kwh) FILTER (WHERE m.meter_name = 'BESS_02') AS bess_2_export,
+            SUM(mr.export_kwh) FILTER (WHERE m.meter_name = 'BESS_03') AS bess_3_export,
+            SUM(mr.import_kwh) FILTER (WHERE m.meter_name = 'BESS_03') AS bess_3_import,
+            SUM(mr.export_kwh) FILTER (WHERE m.meter_name = 'BESS_04') AS bess_4_export,
+            SUM(mr.import_kwh) FILTER (WHERE m.meter_name = 'BESS_04') AS bess_4_import,
             -- RTS / SOLAR
-            SUM(mr.export_kwh) FILTER (WHERE m.serial_number = 'SOLAR_01') AS rts_1_export,
-            SUM(mr.export_kwh) FILTER (WHERE m.serial_number = 'SOLAR_02') AS rts_2_export,
-            SUM(mr.export_kwh) FILTER (WHERE m.serial_number = 'SOLAR_03') AS rts_3_export,
-            SUM(mr.export_kwh) FILTER (WHERE m.serial_number = 'SOLAR_04') AS rts_4_export,
+            SUM(mr.export_kwh) FILTER (WHERE m.meter_name = 'SOLAR_01') AS rts_1_export,
+            SUM(mr.export_kwh) FILTER (WHERE m.meter_name = 'SOLAR_02') AS rts_2_export,
+            SUM(mr.export_kwh) FILTER (WHERE m.meter_name = 'SOLAR_03') AS rts_3_export,
+            SUM(mr.export_kwh) FILTER (WHERE m.meter_name = 'SOLAR_04') AS rts_4_export,
 
             -- OTHER
             SUM(mr.import_kwh) FILTER (WHERE m.role = 'SELF_USE') AS self_import,
@@ -152,7 +152,7 @@ def get_interval_raw_csv(
             SUM(mr.import_kwh) FILTER (WHERE m.role = 'INTERCONNECT') AS interconnect_import
 
         FROM meter_reading mr
-        JOIN meter m ON m.id = mr.meter_id
+        JOIN meters m ON m.id = mr.meter_id
     """
 
     where_clauses = []
@@ -252,21 +252,21 @@ def get_interval_raw_json(
             mr.ts,
 
             -- BESS
-            SUM(mr.import_kwh) FILTER (WHERE m.serial_number = 'BESS_01') AS bess_1_import,
-            SUM(mr.import_kwh) FILTER (WHERE m.serial_number = 'BESS_02') AS bess_2_import,
-            SUM(mr.import_kwh) FILTER (WHERE m.serial_number = 'BESS_03') AS bess_3_import,
-            SUM(mr.import_kwh) FILTER (WHERE m.serial_number = 'BESS_04') AS bess_4_import,
+            SUM(mr.import_kwh) FILTER (WHERE m.meter_name = 'BESS_01') AS bess_1_import,
+            SUM(mr.import_kwh) FILTER (WHERE m.meter_name = 'BESS_02') AS bess_2_import,
+            SUM(mr.import_kwh) FILTER (WHERE m.meter_name = 'BESS_03') AS bess_3_import,
+            SUM(mr.import_kwh) FILTER (WHERE m.meter_name = 'BESS_04') AS bess_4_import,
 
-            SUM(mr.export_kwh) FILTER (WHERE m.serial_number = 'BESS_01') AS bess_1_export,
-            SUM(mr.export_kwh) FILTER (WHERE m.serial_number = 'BESS_02') AS bess_2_export,
-            SUM(mr.export_kwh) FILTER (WHERE m.serial_number = 'BESS_03') AS bess_3_export,
-            SUM(mr.export_kwh) FILTER (WHERE m.serial_number = 'BESS_04') AS bess_4_export,
+            SUM(mr.export_kwh) FILTER (WHERE m.meter_name = 'BESS_01') AS bess_1_export,
+            SUM(mr.export_kwh) FILTER (WHERE m.meter_name = 'BESS_02') AS bess_2_export,
+            SUM(mr.export_kwh) FILTER (WHERE m.meter_name = 'BESS_03') AS bess_3_export,
+            SUM(mr.export_kwh) FILTER (WHERE m.meter_name = 'BESS_04') AS bess_4_export,
 
             -- RTS / SOLAR
-            SUM(mr.export_kwh) FILTER (WHERE m.serial_number = 'SOLAR_01') AS rts_1_export,
-            SUM(mr.export_kwh) FILTER (WHERE m.serial_number = 'SOLAR_02') AS rts_2_export,
-            SUM(mr.export_kwh) FILTER (WHERE m.serial_number = 'SOLAR_03') AS rts_3_export,
-            SUM(mr.export_kwh) FILTER (WHERE m.serial_number = 'SOLAR_04') AS rts_4_export,
+            SUM(mr.export_kwh) FILTER (WHERE m.meter_name = 'SOLAR_01') AS rts_1_export,
+            SUM(mr.export_kwh) FILTER (WHERE m.meter_name = 'SOLAR_02') AS rts_2_export,
+            SUM(mr.export_kwh) FILTER (WHERE m.meter_name = 'SOLAR_03') AS rts_3_export,
+            SUM(mr.export_kwh) FILTER (WHERE m.meter_name = 'SOLAR_04') AS rts_4_export,
 
             -- OTHER
             SUM(mr.import_kwh) FILTER (WHERE m.role = 'SELF_USE') AS self_import,
@@ -274,7 +274,7 @@ def get_interval_raw_json(
             SUM(mr.import_kwh) FILTER (WHERE m.role = 'INTERCONNECT') AS interconnect_import
 
         FROM meter_reading mr
-        JOIN meter m ON m.id = mr.meter_id
+        JOIN meters m ON m.id = mr.meter_id
     """
 
     where_clauses = []
