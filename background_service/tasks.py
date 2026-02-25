@@ -446,6 +446,7 @@ def read_and_save_meters_loop_sreaming_status(self, meter_ids) -> str:
     scheduler = TaskScheduler(r, keys)
 
     # ---- per-task prelogin state reset ----
+    #If there is flag to stop then stop the loop
     scheduler.clear_prelogin(task_id)
     r.delete(_meter_status_list_key(keys, task_id))
     r.delete(_meter_status_seq_key(keys, task_id))
@@ -598,6 +599,7 @@ def read_and_save_meters_loop_sreaming_status(self, meter_ids) -> str:
     except KeyError:
         background_survey_enum = EDMISurvey.LS02
     
+    #List all the meters available and init register for each meter
     for m in db_meters:
         drv = service.get_meter(
             serial=int(m.serial_number) if str(m.serial_number).isdigit() else 0,
@@ -705,6 +707,7 @@ def read_and_save_meters_loop_sreaming_status(self, meter_ids) -> str:
         return "stopped"
 
     # ---- main loop: 30-second aligned slots; read each functional meter once per slot ----
+    last_profile_read_ts: datetime | None = None
     scheduler.set_loop_state(LoopState.RUNNING)
     while True:
         if _should_stop():
@@ -778,10 +781,13 @@ def read_and_save_meters_loop_sreaming_status(self, meter_ids) -> str:
                 
         # ---- START INTEGRATED PROFILE READ CHECK ----
         # See if we crossed a 5-minute profile read boundary
-        current_5m_slot = _floor_to_5m_slot(slot_ts)
-        try:
-            _ = last_profile_read_ts
-        except NameError:
+
+        print("---------------- START INTEGRATED PROFILE READ CHECK ------------------")
+        local_slot_ts = slot_ts.astimezone()
+        print("slot_ts", local_slot_ts)
+
+        current_5m_slot = _floor_to_5m_slot(local_slot_ts)
+        if last_profile_read_ts is None:
             last_profile_read_ts = current_5m_slot
 
         if last_profile_read_ts != current_5m_slot:
@@ -817,10 +823,10 @@ def read_and_save_meters_loop_sreaming_status(self, meter_ids) -> str:
                             try:
                                 with Session(engine) as session:
                                     for row_data in records:
-                                        record_ts = row_data.get("time_stamp")
-                                        if not record_ts:
-                                            continue
-                                        dt_val = datetime.fromisoformat(record_ts) if isinstance(record_ts, str) else record_ts
+                                        # Use the synchronized loop slot timestamp instead of the raw meter timestamp
+                                        # to ensure consistency with register reading (+07 alignment)
+                                        dt_val = row_data.get("DateTime")
+
 
                                         pr = ProfileReadingValue(
                                             meter_id=ctx.meter_id,
@@ -1145,8 +1151,9 @@ def read_and_save_profile_loop_streaming_status(self, meter_ids, survey: str = "
 
 
         # Woke up at target_slot_ts, read profile for the last 5 mins:
-        to_dt = target_slot_ts
-        from_dt = target_slot_ts - timedelta(minutes=5)
+        target_slot_ts_local = target_slot_ts.astimezone()
+        to_dt = target_slot_ts_local
+        from_dt = target_slot_ts_local - timedelta(minutes=5)
         
         # Format datetimes as string for _run_profile_read
         from_str = from_dt.isoformat()
