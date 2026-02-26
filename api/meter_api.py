@@ -521,6 +521,49 @@ async def read_and_save_profile_loop_stop(request: Request):
     return JSONResponse({"status": "stopping", "task_id": task_id})
 
 
+@router.get("/meter_loop_status")
+async def meter_loop_status(request: Request):
+    """
+    Lightweight polling endpoint.
+    Returns the current loop state and latest meter statuses from Redis.
+    No body required — safe to call from the UI on an interval.
+    """
+    r = _redis()
+    keys = Keys()
+    scheduler = TaskScheduler(r, keys)
+
+    task_id = scheduler.get_loop_task_id()
+    loop_state = scheduler.get_loop_state() if task_id else "stopped"
+    is_running = loop_state in ("running", "starting", "paused") if task_id else False
+
+    functional_ids: list = []
+    meter_status: list = []
+    slot_ts: str | None = None
+
+    if task_id:
+        functional_ids = scheduler.get_prelogin_result(task_id) or []
+
+        list_key = _meter_status_list_key(keys, task_id)
+        raw = r.lindex(list_key, -1)
+        if raw:
+            try:
+                event = json.loads(raw)
+                data = event.get("data", {})
+                meter_status = data.get("meter_status", [])
+                slot_ts = data.get("slot_ts")
+            except Exception:
+                pass
+
+    return JSONResponse({
+        "task_id": task_id,
+        "loop_state": loop_state,
+        "is_running": is_running,
+        "functional_ids": functional_ids if isinstance(functional_ids, list) else [],
+        "meter_status": meter_status,
+        "slot_ts": slot_ts,
+    })
+
+
 @router.get("/read_and_save_meters_loop_stop")
 async def read_and_save_meters_loop_stop(request: Request):
     """

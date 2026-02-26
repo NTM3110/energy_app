@@ -447,7 +447,7 @@ def start_server() -> int:
             "--concurrency=1",
         ),
     )
-
+    
     uvicorn_p = _start(cmd.uvicorn, env)
 
     time.sleep(0.3)
