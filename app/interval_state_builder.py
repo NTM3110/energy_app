@@ -1,4 +1,4 @@
-from model.models import IntervalState, MeterReading, Meter
+from model.models import IntervalState, MeterReading, Meter, ProfileReadingValue
 from app.scenario import detect_scenario
 from datetime import timedelta
 
@@ -13,7 +13,7 @@ def build_interval_state(db, ts):
         db.query(MeterReading, Meter)
         .join(Meter)
         .filter(
-            MeterReading.ts == ts,
+            MeterReading.time_stamp == ts,
             )
         .all()
     )
@@ -25,15 +25,15 @@ def build_interval_state(db, ts):
     inter_present = False
 
     for r, m in readings:
-        if m.role == "SOURCE" and m.source_id == 1 and r.export_kwh > 0.0:
+        if m.role == "SOURCE" and m.source_id == 1 and r.total_energy_tot_exp_wh > 0.0:
             bess_count += 1
-        elif m.role == "SOURCE" and m.source_id == 2 and r.export_kwh > 0.0:
+        elif m.role == "SOURCE" and m.source_id == 2 and r.total_energy_tot_exp_wh > 0.0:
             rfs_count += 1
-        elif m.role == "SELF_USE" and r.import_kwh > 0.0:
+        elif m.role == "SELF_USE" and r.total_energy_tot_imp_wh > 0.0:
             self_present = True
-        elif m.role == "GRID_POINT" and r.export_kwh > 0.0:
+        elif m.role == "GRID_POINT" and r.total_energy_tot_exp_wh > 0.0:
             grid_present = True
-        elif m.role == "INTERCONNECT" and r.import_kwh > 0.0:
+        elif m.role == "INTERCONNECT" and r.total_energy_tot_imp_wh > 0.0:
             inter_present = True
 
     bess_available = bess_count > 0

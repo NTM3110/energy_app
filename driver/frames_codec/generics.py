@@ -198,7 +198,6 @@ def edmi_end_init_packet(packet: BytesLike) -> bytes:
     out_mv[:n] = mv
     out_mv[n] = (crc >> 8) & 0xFF
     out_mv[n + 1] = crc & 0xFF
-    print("Appended CRC bytes:", out_mv[n:n+2].tobytes().hex(" "))
     # Post process (byte stuffing)
     stuffed = edmi_post_process(out_mv)
 

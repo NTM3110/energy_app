@@ -22,17 +22,17 @@ def get_meter_reading_at(db, ts: datetime, meter_id: int, field: str = "export")
     reading = (
         db.query(MeterReading)
         .filter(
-            MeterReading.ts <= ts,
+            MeterReading.time_stamp <= ts,
             MeterReading.meter_id == meter_id,
         )
-        .order_by(MeterReading.ts.desc())
+        .order_by(MeterReading.time_stamp.desc())
         .first()
     )
     if reading is None:
         return 0.0
     return (
-        reading.export_kwh if field == "export"
-        else reading.import_kwh
+        reading.total_energy_tot_exp_wh if field == "export"
+        else reading.total_energy_tot_imp_wh
     )
 
 

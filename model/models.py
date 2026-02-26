@@ -10,25 +10,39 @@ from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import declarative_base, relationship
 from app.db import Base
 
+F32 = Float(precision=24)
+F64 = Float(precision=53)
 
 class MeterReading(Base):
-    __tablename__ = "meter_reading"
+    __tablename__ = "profile_reading_demo"
 
-    id = Column(Integer, primary_key=True)
-    meter_id = Column(Integer, ForeignKey("meters.id"), nullable=False)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
 
-    ts = Column(DateTime, nullable=False)  # interval end time
+    meter_id = Column(Integer, ForeignKey("meters.id", ondelete="CASCADE"), nullable=False)
+    meter = relationship("Meter", back_populates="meter_readings")
 
-    import_kwh = Column(Float, nullable=False, default=0.0)
-    export_kwh = Column(Float, nullable=False, default=0.0)
+    # Timestamp of the profile record (from LS03 "time_stamp")
+    time_stamp = Column(DateTime(timezone=False), nullable=False)
+
+    # LS03 "Record Status" (0.0 means valid interval record)
+    record_status = Column(F64, nullable=True)
+
+    # LS03 cumulative totals (use same meaning as your LS03 keys)
+    total_energy_tot_imp_wh = Column(F64, nullable=True)  # "Total Energy Tot IMP Wh @"
+    total_energy_tot_exp_wh = Column(F64, nullable=True)  # "Total Energy Tot EXP Wh @"
+    total_energy_tot_imp_va = Column(F64, nullable=True)  # "Total Energy Tot IMP va @"
+    total_energy_tot_exp_va = Column(F64, nullable=True)  # "Total Energy Tot EXP va @"
+
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
 
     __table_args__ = (
-        UniqueConstraint("meter_id", "ts", name="uq_meter_interval"),
-        CheckConstraint(
-            "(import_kwh = 0 AND export_kwh >= 0) OR "
-            "(export_kwh = 0 AND import_kwh >= 0)",
-            name="ck_single_direction_energy"
-        ),
+        UniqueConstraint("meter_id", "time_stamp", name="uq_meter_profile_meter_time_demo"),
+        Index("ix_meter_profile_meter_time_demo", "meter_id", "time_stamp"),
+        Index("ix_meter_profile_time_demo", "time_stamp"),
     )
 
 class IntervalState(Base):
@@ -231,18 +245,19 @@ class Meter(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
-    
+
+    meter_readings = relationship(
+        "MeterReading",
+        back_populates="meter",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
     profile_reading_values = relationship(
     "ProfileReadingValue",
     back_populates="meter",
     cascade="all, delete-orphan",
     passive_deletes=True,
 )
-
-
-
-F32 = Float(precision=24)
-F64 = Float(precision=53)
 
 
 class ReadingValue(Base):

@@ -8,7 +8,7 @@ import signal
 import socket
 
 from app.db import Base, engine, SessionLocal
-from model.models import Meter, MeterReading, IntervalState, EnergySite, EnergySource
+from model.models import Meter, MeterReading, IntervalState, EnergySite, EnergySource, ProfileReadingValue
 from model.models import User
 from app.interval_state_builder import build_interval_state
 from app.period_builder import build_periods
@@ -22,7 +22,7 @@ from dataclasses import dataclass
 # CONFIG
 # -------------------------------------------------------------------
 
-CSV_PATH = "demo_lp_2026_01_to_03.csv"
+CSV_PATH = "reformatted_demo_lp_2026_01_to_03.csv"
 DEMO_SLEEP_SECONDS = 0.1
 FAST_MODE = os.getenv("FAST", "0") == "1"
 
@@ -159,7 +159,7 @@ def run_demo():
         reader = csv.DictReader(f)
 
         for row in reader:
-            ts = datetime.fromisoformat(row["ts"])
+            ts = datetime.fromisoformat(row["time_stamp"])
             interval_key = (ts,)
 
             if current_interval is None:
@@ -240,18 +240,22 @@ def process_interval(db, rows, ts):
 
     for row in rows:
         meter = db.query(Meter).filter_by(
-            meter_name=row["meter_serial"]
+            meter_name=row["meter_id"]
         ).first()
 
         if not meter:
-            print(f"⚠ Unknown meter {row['meter_serial']} — skipped")
+            print(f"⚠ Unknown meter {row['meter_id']} — skipped")
             continue
 
         db.add(MeterReading(
             meter_id=meter.id,
-            ts=ts,
-            import_kwh=float(row["import_kwh"]),
-            export_kwh=float(row["export_kwh"]),
+            time_stamp=ts,
+            record_status = int(row["record_status"]),
+            total_energy_tot_imp_wh=float(row["total_energy_tot_imp_wh"]),
+            total_energy_tot_exp_wh=float(row["total_energy_tot_exp_wh"]),
+            total_energy_tot_imp_va=float(row["total_energy_tot_imp_va"]),
+            total_energy_tot_exp_va=float(row["total_energy_tot_exp_va"]),
+            created_at=ts,
         ))
         inserted += 1
 

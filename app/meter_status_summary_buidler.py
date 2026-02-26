@@ -21,7 +21,7 @@ INTERVAL_DURATION = timedelta(minutes=30)
 # ============================================================
 
 def is_faulty_reading(reading: MeterReading) -> bool:
-    return reading.import_kwh == 0 and reading.export_kwh == 0
+    return reading.total_energy_tot_exp_wh == 0 and reading.total_energy_tot_imp_wh == 0
 
 
 # ============================================================
@@ -100,8 +100,8 @@ def process_period(session, period: CalculationPeriod):
     readings = (
         session.query(MeterReading)
         .filter(
-            MeterReading.ts > period.period_start,
-            MeterReading.ts <= period.period_end,
+            MeterReading.time_stamp > period.period_start,
+            MeterReading.time_stamp <= period.period_end,
         )
         .all()
     )
