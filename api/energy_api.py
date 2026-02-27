@@ -8,7 +8,8 @@ from io import StringIO
 import csv
 # Import your ORM models for these tables.
 # If you don't have them yet, add them in model/models.py first.
-from model.models import MonthlyEnergySummary, MonthlyCalculationBreakdown
+from model.models import MonthlyEnergySummary, MonthlyCalculationBreakdown, EnergyRole, EnergySource, ProfileReadingValue
+from schema.meter import ReadProfileBodyDb
 
 router = APIRouter()
 
@@ -57,6 +58,25 @@ def get_monthly_summary(
         "offset": offset,
     }
 
+@router.get("/energy/profile-reading")
+def get_profile_reading(
+    request: Request,
+    body: ReadProfileBodyDb,
+):
+    engine = request.app.state.engine
+    with Session(engine) as session:
+        q = session.query(ProfileReadingValue)
+
+        if body.from_dt is not None:
+            q = q.filter(ProfileReadingValue.ts >= body.from_dt)
+        if body.to_dt is not None:
+            q = q.filter(ProfileReadingValue.ts < body.to_dt)
+
+        items = q.all()
+
+    return {
+        "items": [i.__dict__ for i in items],
+    }
 
 @router.get("/energy/monthly-breakdown")
 def get_monthly_breakdown(
@@ -238,6 +258,20 @@ def get_interval_raw_csv(
             "Content-Disposition": "attachment; filename=interval_raw_energy.csv"
         },
     )
+
+@router.get("/energy/roles")
+def get_roles(request: Request):
+    engine = request.app.state.engine
+    with Session(engine) as session:
+        roles = session.query(EnergyRole).all()
+    return {"items": [r.__dict__ for r in roles]}
+
+@router.get("/energy/sources")
+def get_sources(request: Request):
+    engine = request.app.state.engine
+    with Session(engine) as session:
+        sources = session.query(EnergySource).all()
+    return {"items": [s.__dict__ for s in sources]}
 
 @router.get("/energy/interval-raw")
 def get_interval_raw_json(

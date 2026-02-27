@@ -33,6 +33,13 @@ class ReadProfileBody(BaseModel):
     to_datetime: date
     max_records: int | None = None
 
+class ReadProfileBodyDb(BaseModel):
+    meter_id:int
+    from_datetime: datetime
+    to_datetime: datetime
+    max_records: int | None = None
+
+
 class ReadProfileLoopBody(BaseModel):
     meters_id_list: list[int]
     survey: str = "LS02"
@@ -50,6 +57,8 @@ class AddMeterRequestBody(BaseModel):
         None,
         description="Survey types for this meter",
     )
+    role: Optional[int] = Field(None, description="Role ID")
+    source_id: Optional[int] = Field(None, description="Source ID")
 
 
 class UpdateMeterRequestBody(BaseModel):

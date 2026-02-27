@@ -34,6 +34,8 @@ def add_meter(request: Request, body: AddMeterRequestBody):
         outstation=getattr(body, "outstation", None),
         type=body.type,
         model=body.model,
+        role_id=getattr(body, "role", None),
+        source_id=getattr(body, "source_id", None),
         survey_type=getattr(body, "survey_type", None),
     )
 
@@ -48,7 +50,7 @@ def add_meter(request: Request, body: AddMeterRequestBody):
             if exist:
                 return {
                     "serial_number": body.serial_number,
-                    "status": "meter with the same serial number already exsit",
+                    "status": "meter with the same serial number already exists",
                 }
 
             session.add(meter)
@@ -84,6 +86,8 @@ def get_all_meters_info(request: Request):
                 "type": m.type,
                 "model": m.model,
                 "survey_type": m.survey_type or [],
+                "role_id": m.role_id,
+                "source_id": m.source_id,
 
             }
             for m in meter_obj_all

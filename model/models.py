@@ -217,13 +217,25 @@ class EnergySource(Base):
         passive_deletes=True,
     )
 
+class EnergyRole(Base):
+    __tablename__ = "energy_roles"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(100), nullable=False)
+
+    meters = relationship(
+        "Meter",
+        back_populates="role",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
 class Meter(Base):
     __tablename__ = "meters"
 
     id = Column(Integer, primary_key=True)
     serial_number = Column(Integer, nullable=False, unique=True)
-    role = Column(String, nullable=True)  # SOURCE / SELF_USE / GRID_POINT / INTERCONNECT
+    role_id = Column(Integer, ForeignKey("energy_roles.id", ondelete="SET NULL"), nullable=True)  # SOURCE / SELF_USE / GRID_POINT / INTERCONNECT
     source_id = Column(Integer, ForeignKey("energy_sources.id", ondelete="SET NULL"), nullable=True)  # 1=BESS, 2=RTS
     site_id = Column(Integer, ForeignKey("energy_sites.id", ondelete="SET NULL"), nullable=True)
     username = Column(String(100), nullable=False)
@@ -237,6 +249,7 @@ class Meter(Base):
 
     owner = relationship("User", back_populates="meters")
     site = relationship("EnergySite", back_populates="meters")
+    role = relationship("EnergyRole", back_populates="meters")
     source = relationship("EnergySource", back_populates="meters")
 
     reading_values = relationship(
@@ -427,4 +440,45 @@ class ProfileReadingValue(Base):
         UniqueConstraint("meter_id", "time_stamp", name="uq_meter_profile_meter_time"),
         Index("ix_meter_profile_meter_time", "meter_id", "time_stamp"),
         Index("ix_meter_profile_time", "time_stamp"),
+    )
+
+
+class ProfileReadGap(Base):
+    """
+    Persists missed 30-minute profile-read windows so they can be retried
+    when the meter comes back online.  Survives service restarts.
+    """
+    __tablename__ = "profile_read_gaps"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+
+    meter_id = Column(
+        Integer,
+        ForeignKey("meters.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    from_dt = Column(DateTime(timezone=False), nullable=False)
+    to_dt   = Column(DateTime(timezone=False), nullable=False)
+
+    # pending  →  done | failed
+    status = Column(String(20), nullable=False, default="pending")
+
+    retry_count = Column(Integer, nullable=False, default=0)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        UniqueConstraint("meter_id", "from_dt", "to_dt", name="uq_profile_gap_meter_window"),
+        Index("ix_profile_gap_meter_status", "meter_id", "status"),
     )

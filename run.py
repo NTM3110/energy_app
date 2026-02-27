@@ -8,7 +8,7 @@ import signal
 import socket
 
 from app.db import Base, engine, SessionLocal
-from model.models import Meter, MeterReading, IntervalState, EnergySite, EnergySource, ProfileReadingValue
+from model.models import Meter, MeterReading, IntervalState, EnergySite, EnergySource, ProfileReadingValue, EnergyRole
 from model.models import User
 from app.interval_state_builder import build_interval_state
 from app.period_builder import build_periods
@@ -83,22 +83,43 @@ def ensure_meters(db):
         rts = EnergySource(name="RTS", cost_per_kwh=0.05)
         db.add(rts)
 
+    # --- energy roles ---
+    source_role = db.query(EnergyRole).filter_by(name="SOURCE").first()
+    if not source_role:
+        source_role = EnergyRole(name="SOURCE")
+        db.add(source_role)
+    
+    self_use_role = db.query(EnergyRole).filter_by(name="SELF_USE").first()
+    if not self_use_role:
+        self_use_role = EnergyRole(name="SELF_USE")
+        db.add(self_use_role)
+
+    grid_role = db.query(EnergyRole).filter_by(name="GRID_POINT").first()
+    if not grid_role:
+        grid_role = EnergyRole(name="GRID_POINT")
+        db.add(grid_role)
+
+    interconnect_role = db.query(EnergyRole).filter_by(name="INTERCONNECT").first()
+    if not interconnect_role:
+        interconnect_role = EnergyRole(name="INTERCONNECT")
+        db.add(interconnect_role)
+
     db.flush()
 
     # --- meters ---
     # (serial_number, role, source, site, meter_name)
     meter_defs = [
-        (253319561, "SOURCE",       bess, factory, "BESS_01"),
-        (253319562, "SOURCE",       bess, factory, "BESS_02"),
-        (253319563, "SOURCE",       bess, factory, "BESS_03"),
-        (253319564, "SOURCE",       bess, factory, "BESS_04"),
-        (253319565, "SOURCE",       rts,  factory, "SOLAR_01"),
-        (253319566, "SOURCE",       rts,  factory, "SOLAR_02"),
-        (253319567, "SOURCE",       rts,  factory, "SOLAR_03"),
-        (253319568, "SOURCE",       rts,  factory, "SOLAR_04"),
-        (253319569, "SELF_USE",     None, factory, "SELF_01"),
-        (253319570, "GRID_POINT",   None, factory, "GRID_01"),
-        (253319571, "INTERCONNECT", None, dest,    "DEST_01"),
+        (253319561, source_role,       bess, factory, "BESS_01"),
+        (253319562, source_role,       bess, factory, "BESS_02"),
+        (253319563, source_role,       bess, factory, "BESS_03"),
+        (253319564, source_role,       bess, factory, "BESS_04"),
+        (253319565, source_role,       rts,  factory, "SOLAR_01"),
+        (253319566, source_role,       rts,  factory, "SOLAR_02"),
+        (253319567, source_role,       rts,  factory, "SOLAR_03"),
+        (253319568, source_role,       rts,  factory, "SOLAR_04"),
+        (253319569, self_use_role,     None, factory, "SELF_01"),
+        (253319570, grid_role,   None, factory, "GRID_01"),
+        (253319571, interconnect_role, None, dest,    "DEST_01"),
     ]
 
     created = 0

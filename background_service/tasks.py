@@ -18,7 +18,7 @@ from .scheduler import TaskScheduler, LoopControl, LoopState
 from utils.utils import serialize_error, format_parsed_profile_data
 from driver.edmi_enums import EDMI_ERROR_CODE
 from driver.interface.edmi_structs import EDMISurvey
-from model.models import Meter, ReadingValue
+from model.models import Meter, ReadingValue, ProfileReadingValue, ProfileReadGap
 from db_utils.db_utils import map_registers_to_reading_columns
 from runtime_settings import REDIS_URL
 
@@ -491,6 +491,10 @@ def read_and_save_meters_loop_sreaming_status(self, meter_ids) -> str:
     def _floor_to_30m_slot(ts: datetime) -> datetime:
         slot_minute = 0 if ts.minute < 30 else 30
         return ts.replace(minute=slot_minute, second=0, microsecond=0)
+    
+    def _floor_to_5m_slot(ts: datetime) -> datetime:
+        slot_minute = (ts.minute // 5) * 5
+        return ts.replace(minute=slot_minute, second=0, microsecond=0)
 
     def _sleep_until(target: datetime, max_chunk_seconds: float = 0.2) -> bool:
         # Returns False if stopped while waiting, True otherwise.
@@ -600,6 +604,10 @@ def read_and_save_meters_loop_sreaming_status(self, meter_ids) -> str:
                     logger.warning("Pre-login timeout: serial=%s", ctx.serial_number)
                     _set_status(status_map, ctx.meter_id, "prelogin_timeout")
                     continue
+                except Exception as e:
+                    logger.warning("Pre-login error: serial=%s err=%s", ctx.serial_number, e)
+                    _set_status(status_map, ctx.meter_id, "prelogin_error", error=str(e))
+                    continue
             finally:
                 try: service.media.flush_input()
                 except Exception: pass
@@ -614,8 +622,6 @@ def read_and_save_meters_loop_sreaming_status(self, meter_ids) -> str:
 
         _publish_meter_status(r, keys, task_id=task_id, meter_status=_snapshot(status_map))
         scheduler.set_prelogin_result(task_id, [c.meter_id for c in functional_ctxs])
-        if not functional_ctxs:
-            continue
 
         # Process meters for this slot
         for ctx in functional_ctxs:
@@ -672,72 +678,243 @@ def read_and_save_meters_loop_sreaming_status(self, meter_ids) -> str:
                 _set_status(status_map, ctx.meter_id, "read_exception", error=str(e))
                 
         # ---- START INTEGRATED PROFILE READ CHECK ----
-        # See if we crossed a 30-minute profile read boundary
+        # See if we crossed a 5-minute profile read boundary
         local_slot_ts = slot_ts.astimezone()
 
-        current_30m_slot = _floor_to_30m_slot(local_slot_ts)
+        current_5m_slot = _floor_to_5m_slot(local_slot_ts)
         if last_profile_read_ts is None:
-            last_profile_read_ts = current_30m_slot
+            last_profile_read_ts = current_5m_slot
 
-        if last_profile_read_ts != current_30m_slot:
+        if last_profile_read_ts != current_5m_slot:
             # We entered a new 30-minute slot. Execute profile reading for the previous 30 mins.
-            try:
-                from model.models import ProfileReadingValue
-                logger.info(f"Triggering integrated profile read for slot {current_30m_slot.isoformat()}")
-                for ctx in functional_ctxs:
-                    if _should_stop():
-                        break
-                    
-                    to_dt = current_30m_slot
-                    from_dt = current_30m_slot - timedelta(minutes=30)
-                    from_str = from_dt.isoformat()
-                    to_str = to_dt.isoformat()
-                    
+            to_dt = current_5m_slot
+            from_dt = current_5m_slot - timedelta(minutes=5)
+            from_str = from_dt.isoformat()
+            to_str = to_dt.isoformat()
+
+            logger.info(f"Triggering integrated profile read for slot {current_5m_slot.isoformat()}")
+
+            # --- Record gaps for meters NOT in functional_ctxs ---
+            functional_ids = {c.meter_id for c in functional_ctxs}
+            non_functional_ids = current_db_ids - functional_ids
+            if non_functional_ids:
+                try:
+                    with Session(engine) as session:
+                        for nf_id in non_functional_ids:
+                            gap = ProfileReadGap(
+                                meter_id=nf_id,
+                                from_dt=from_dt,
+                                to_dt=to_dt,
+                            )
+                            session.add(gap)
+                            try:
+                                session.commit()
+                            except Exception:
+                                session.rollback()  # duplicate or other
+                    logger.info(
+                        "Recorded profile gaps for %d non-functional meter(s): %s",
+                        len(non_functional_ids),
+                        non_functional_ids,
+                    )
+                except Exception as e:
+                    logger.exception("Failed to record profile gaps: %s", e)
+
+            # --- Profile-read each functional meter ---
+            successful_meter_ids: set[int] = set()
+            for ctx in functional_ctxs:
+                if _should_stop():
+                    break
+                logger.info(
+                    "------------------- Profile read for meter %s, %s, %s, %s ------------------------",
+                    ctx.meter_id, ctx.serial_number, from_str, to_str,
+                )
+                try:
+                    p_result = _run_profile_read(
+                        service=service,
+                        sem=sem,
+                        meter_id=ctx.meter_id,
+                        serial_number=ctx.serial_number,
+                        username=ctx.username,
+                        password=ctx.password,
+                        survey=int(background_survey_enum),
+                        from_datetime=from_str,
+                        to_datetime=to_str,
+                        max_records=5,
+                    )
+
+                    if p_result and p_result.get("status") == "ok":
+                        records = p_result.get("data", [])
+                        try:
+                            with Session(engine) as session:
+                                for row_data in records:
+                                    dt_val = row_data.get("DateTime")
+                                    pr = ProfileReadingValue(
+                                        meter_id=ctx.meter_id,
+                                        time_stamp=dt_val,
+                                        record_status=row_data.get("Record Status"),
+                                        total_energy_tot_imp_wh=row_data.get("Total Energy Tot IMP Wh @"),
+                                        total_energy_tot_exp_wh=row_data.get("Total Energy Tot EXP Wh @"),
+                                        total_energy_tot_imp_va=row_data.get("Total Energy Tot IMP va @"),
+                                        total_energy_tot_exp_va=row_data.get("Total Energy Tot EXP va @"),
+                                    )
+                                    session.add(pr)
+                                    try:
+                                        session.commit()
+                                    except Exception:
+                                        session.rollback()
+                            logger.info(
+                                "Integrated loop saved %d profile records for meter %s",
+                                len(records), ctx.meter_id,
+                            )
+                        except Exception as e:
+                            logger.exception("Failed to save background profile data: %s", e)
+                        successful_meter_ids.add(ctx.meter_id)
+                    else:
+                        # Profile read returned non-ok — record a gap
+                        try:
+                            with Session(engine) as session:
+                                gap = ProfileReadGap(
+                                    meter_id=ctx.meter_id,
+                                    from_dt=from_dt,
+                                    to_dt=to_dt,
+                                )
+                                session.add(gap)
+                                try:
+                                    session.commit()
+                                except Exception:
+                                    session.rollback()
+                            logger.warning(
+                                "Profile read non-ok for meter %s — gap recorded",
+                                ctx.meter_id,
+                            )
+                        except Exception as e:
+                            logger.exception("Failed to record gap for meter %s: %s", ctx.meter_id, e)
+
+                except Exception as e:
+                    logger.exception("Integrated profile read error: %s", e)
+                    # Record gap for exception too
                     try:
-                        p_result = _run_profile_read(
-                            service=service,
-                            sem=sem,
-                            meter_id=ctx.meter_id,
-                            serial_number=ctx.serial_number,
-                            username=ctx.username,
-                            password=ctx.password,
-                            survey=int(background_survey_enum),
-                            from_datetime=from_str,
-                            to_datetime=to_str,
-                            max_records=5,
+                        with Session(engine) as session:
+                            gap = ProfileReadGap(
+                                meter_id=ctx.meter_id,
+                                from_dt=from_dt,
+                                to_dt=to_dt,
+                            )
+                            session.add(gap)
+                            try:
+                                session.commit()
+                            except Exception:
+                                session.rollback()
+                    except Exception:
+                        pass
+
+            # --- Retry pending gaps for meters that read successfully ---
+            if successful_meter_ids:
+                try:
+                    with Session(engine) as session:
+                        pending_gaps = (
+                            session.query(ProfileReadGap)
+                            .filter(
+                                ProfileReadGap.meter_id.in_(successful_meter_ids),
+                                ProfileReadGap.status == "pending",
+                                ProfileReadGap.retry_count < 3,
+                            )
+                            .order_by(ProfileReadGap.from_dt)
+                            .limit(10)  # cap per cycle to avoid overload
+                            .all()
                         )
 
-                        if p_result and p_result.get("status") == "ok":
-                            records = p_result.get("data", [])
-                            try:
-                                with Session(engine) as session:
+                    for gap in pending_gaps:
+                        if _should_stop():
+                            break
+                        # Find the ctx for this meter
+                        gap_ctx = next(
+                            (c for c in functional_ctxs if c.meter_id == gap.meter_id),
+                            None,
+                        )
+                        if gap_ctx is None:
+                            continue
+
+                        logger.info(
+                            "Retrying gap meter=%s from=%s to=%s (attempt %d)",
+                            gap.meter_id, gap.from_dt.isoformat(),
+                            gap.to_dt.isoformat(), gap.retry_count + 1,
+                        )
+                        try:
+                            p_result = _run_profile_read(
+                                service=service,
+                                sem=sem,
+                                meter_id=gap_ctx.meter_id,
+                                serial_number=gap_ctx.serial_number,
+                                username=gap_ctx.username,
+                                password=gap_ctx.password,
+                                survey=int(background_survey_enum),
+                                from_datetime=gap.from_dt.isoformat(),
+                                to_datetime=gap.to_dt.isoformat(),
+                                max_records=5,
+                            )
+
+                            with Session(engine) as session:
+                                db_gap = session.get(ProfileReadGap, gap.id)
+                                if p_result and p_result.get("status") == "ok":
+                                    records = p_result.get("data", [])
                                     for row_data in records:
                                         dt_val = row_data.get("DateTime")
-
                                         pr = ProfileReadingValue(
-                                            meter_id=ctx.meter_id,
+                                            meter_id=gap_ctx.meter_id,
                                             time_stamp=dt_val,
                                             record_status=row_data.get("Record Status"),
                                             total_energy_tot_imp_wh=row_data.get("Total Energy Tot IMP Wh @"),
                                             total_energy_tot_exp_wh=row_data.get("Total Energy Tot EXP Wh @"),
                                             total_energy_tot_imp_va=row_data.get("Total Energy Tot IMP va @"),
-                                            total_energy_tot_exp_va=row_data.get("Total Energy Tot EXP va @")
+                                            total_energy_tot_exp_va=row_data.get("Total Energy Tot EXP va @"),
                                         )
                                         session.add(pr)
                                         try:
                                             session.commit()
                                         except Exception:
                                             session.rollback()
-                                logger.info(f"Integrated loop saved {len(records)} profile records for meter {ctx.meter_id}")
-                            except Exception as e:
-                                logger.exception("Failed to save background profile data: %s", e)
-                    except Exception as e:
-                        logger.exception("Integrated profile read error: %s", e)
-            except ImportError:
-                pass
-            
+                                    db_gap.status = "done"
+                                    logger.info(
+                                        "Gap retry OK: meter=%s from=%s — saved %d records",
+                                        gap.meter_id, gap.from_dt.isoformat(), len(records),
+                                    )
+                                else:
+                                    db_gap.retry_count += 1
+                                    if db_gap.retry_count >= 3:
+                                        db_gap.status = "failed"
+                                        logger.warning(
+                                            "Gap retry exhausted (3/3): meter=%s from=%s",
+                                            gap.meter_id, gap.from_dt.isoformat(),
+                                        )
+                                    else:
+                                        logger.warning(
+                                            "Gap retry %d/3 failed: meter=%s from=%s",
+                                            db_gap.retry_count, gap.meter_id,
+                                            gap.from_dt.isoformat(),
+                                        )
+                                session.commit()
+
+                        except Exception as e:
+                            logger.exception(
+                                "Gap retry exception: meter=%s from=%s: %s",
+                                gap.meter_id, gap.from_dt.isoformat(), e,
+                            )
+                            try:
+                                with Session(engine) as session:
+                                    db_gap = session.get(ProfileReadGap, gap.id)
+                                    db_gap.retry_count += 1
+                                    if db_gap.retry_count >= 3:
+                                        db_gap.status = "failed"
+                                    session.commit()
+                            except Exception:
+                                pass
+
+                except Exception as e:
+                    logger.exception("Failed to process pending gaps: %s", e)
+
             # Update our marker so we don't read this slot again
-            last_profile_read_ts = current_30m_slot
+            last_profile_read_ts = current_5m_slot
         # ---- END INTEGRATED PROFILE READ CHECK ----
 
         _publish_meter_status(

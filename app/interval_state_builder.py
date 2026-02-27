@@ -9,6 +9,12 @@ EXPECTED_RFS_SOURCES = 4
 
 
 def build_interval_state(db, ts):
+    bess_meters = db.query(Meter).filter_by(source_id=1).all()
+    rfs_meters = db.query(Meter).filter_by(source_id=2).all()
+    self_meter = db.query(Meter).filter_by(role_id=2).first()
+    grid_meter = db.query(Meter).filter_by(role_id=3).first()
+    inter_meter = db.query(Meter).filter_by(role_id=4).first()
+
     readings = (
         db.query(MeterReading, Meter)
         .join(Meter)
@@ -25,26 +31,26 @@ def build_interval_state(db, ts):
     inter_present = False
 
     for r, m in readings:
-        if m.role == "SOURCE" and m.source_id == 1 and r.total_energy_tot_exp_wh > 0.0:
+        if m.role_id == 1 and m.source_id == 1 and r.total_energy_tot_exp_wh > 0.0:
             bess_count += 1
-        elif m.role == "SOURCE" and m.source_id == 2 and r.total_energy_tot_exp_wh > 0.0:
+        elif m.role_id == 1 and m.source_id == 2 and r.total_energy_tot_exp_wh > 0.0:
             rfs_count += 1
-        elif m.role == "SELF_USE" and r.total_energy_tot_imp_wh > 0.0:
+        elif m.role_id == 2 and r.total_energy_tot_imp_wh > 0.0:
             self_present = True
-        elif m.role == "GRID_POINT" and r.total_energy_tot_exp_wh > 0.0:
+        elif m.role_id == 3 and r.total_energy_tot_exp_wh > 0.0:
             grid_present = True
-        elif m.role == "INTERCONNECT" and r.total_energy_tot_imp_wh > 0.0:
+        elif m.role_id == 4 and r.total_energy_tot_imp_wh > 0.0:
             inter_present = True
 
     bess_available = bess_count > 0
     rfs_available = rfs_count > 0
 
-    bess_missing_count = (EXPECTED_BESS_SOURCES - bess_count) if bess_available else EXPECTED_BESS_SOURCES
-    rfs_missing_count = (EXPECTED_RFS_SOURCES - rfs_count) if rfs_available else EXPECTED_RFS_SOURCES
+    bess_missing_count = (len(bess_meters) - bess_count) if bess_available else len(bess_meters)
+    rfs_missing_count = (len(rfs_meters) - rfs_count) if rfs_available else len(rfs_meters)
 
     # clamp to sane bounds
-    bess_missing_count = max(0, min(bess_missing_count, EXPECTED_BESS_SOURCES))
-    rfs_missing_count = max(0, min(rfs_missing_count, EXPECTED_RFS_SOURCES))
+    bess_missing_count = max(0, min(bess_missing_count, len(bess_meters)))
+    rfs_missing_count = max(0, min(rfs_missing_count, len(rfs_meters)))
 
     scenario = detect_scenario(
         bess_missing_count=bess_missing_count,

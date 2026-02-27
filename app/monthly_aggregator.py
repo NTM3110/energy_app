@@ -138,11 +138,11 @@ def build_monthly_summary(db, year, month):
         grid = inter = self_use = 0.0
 
         # 1. Get list of meter IDs by type
-        rts_meters = db.query(Meter).filter_by(role="SOURCE", source_id=2).all()
-        bess_meters = db.query(Meter).filter_by(role="SOURCE", source_id=1).all()
-        self_use_meters = db.query(Meter).filter_by(role="SELF_USE").all()
-        grid_meters = db.query(Meter).filter_by(role="GRID_POINT").all()
-        inter_meters = db.query(Meter).filter_by(role="INTERCONNECT").all()
+        rts_meters = db.query(Meter).filter_by(role_id=1, source_id=2).all()
+        bess_meters = db.query(Meter).filter_by(role_id=1, source_id=1).all()
+        self_use_meters = db.query(Meter).filter_by(role_id=2).all()
+        grid_meters = db.query(Meter).filter_by(role_id=3).all()
+        inter_meters = db.query(Meter).filter_by(role_id=4).all()
 
         # 2. Get cumulative delta per meter
         rts_energy = 0.0
