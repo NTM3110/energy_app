@@ -14,6 +14,7 @@ from app.interval_state_builder import build_interval_state
 from app.period_builder import build_periods
 from app.monthly_aggregator import build_monthly_summary
 from app.meter_status_summary_buidler import build_meter_status_summary
+from app.security import get_password_hash
 from datetime import timedelta
 from typing import Mapping, Sequence
 from dataclasses import dataclass
@@ -22,7 +23,7 @@ from dataclasses import dataclass
 # CONFIG
 # -------------------------------------------------------------------
 
-CSV_PATH = "reformatted_demo_lp_2026_01_to_03.csv"
+CSV_PATH = "reformatted_demo_lp_2025_01_to_26.csv"
 DEMO_SLEEP_SECONDS = 0.1
 FAST_MODE = os.getenv("FAST", "0") == "1"
 
@@ -52,12 +53,53 @@ def ensure_meters(db):
       - 11 Meters (4 BESS, 4 RTS, 1 SELF_USE, 1 GRID_POINT, 1 INTERCONNECT)
     """
 
-    # --- default owner ---
-    default_user = db.query(User).first()
-    if not default_user:
-        default_user = User(name="admin", password_hash="hash")
-        db.add(default_user)
-        db.commit()
+    # --- default users ---
+    # Create standard users with hashed passwords (using a dummy hash for now, will be updated to real bcrypt in auth step)
+    
+    admin_user = db.query(User).filter_by(username="admin").first()
+    if not admin_user:
+        admin_user = User(
+            username="admin", 
+            email="admin@maxicom.local",
+            full_name="System Administrator",
+            password_hash=get_password_hash("admin"),
+            role="admin",
+            enabled=True,
+            permissions='{"canViewDashboard":true,"canViewMeterDetail":true,"canEditMeterConfig":true,"canExportData":true,"canManageAlerts":true,"canManageUsers":true}'
+        )
+        db.add(admin_user)
+
+    operator_user = db.query(User).filter_by(username="operator").first()
+    if not operator_user:
+        operator_user = User(
+            username="operator", 
+            email="operator@maxicom.local",
+            full_name="System Operator",
+            password_hash=get_password_hash("operator"),
+            role="operator",
+            enabled=True,
+            permissions='{"canViewDashboard":true,"canViewMeterDetail":true,"canEditMeterConfig":true,"canExportData":true,"canManageAlerts":true,"canManageUsers":false}'
+        )
+        db.add(operator_user)
+
+    viewer_user = db.query(User).filter_by(username="user").first()
+    if not viewer_user:
+        viewer_user = User(
+            username="user", 
+            email="user@maxicom.local",
+            full_name="System User",
+            password_hash=get_password_hash("user"),
+            role="user",
+            enabled=True,
+            permissions='{"canViewDashboard":true,"canViewMeterDetail":true,"canEditMeterConfig":false,"canExportData":false,"canManageAlerts":false,"canManageUsers":false}'
+        )
+        db.add(viewer_user)
+
+    db.commit()
+
+    # We still need a default user ID for the meters created below.
+    # Use the admin user as the default owner.
+    default_user = admin_user
 
     # --- energy sites ---
     factory = db.query(EnergySite).filter_by(type="ENERGY_FACTORY").first()
@@ -444,7 +486,7 @@ def start_server() -> int:
     redis_url = env["REDIS_URL"]
 
     host = "0.0.0.0"
-    port = 8000
+    port = 8001
     if not _port_available(host, port):
         sys.stderr.write(f"ERROR: Port {port} is already in use on {host}\n")
         return 1

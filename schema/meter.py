@@ -29,8 +29,8 @@ class ReadProfileBody(BaseModel):
     username: str | None = None
     password: str | None = None
     survey: str
-    from_datetime: date
-    to_datetime: date
+    from_datetime: datetime
+    to_datetime: datetime
     max_records: int | None = None
 
 class ReadProfileBodyDb(BaseModel):
@@ -74,6 +74,8 @@ class UpdateMeterRequestBody(BaseModel):
         None,
         description="Survey types for this meter",
     )
+    role: Optional[int] = Field(None, description="Role ID")
+    source_id: Optional[int] = Field(None, description="Source ID")
 
 class TimeRange(BaseModel):
     start_utc: datetime = Field(..., description="Inclusive start (UTC). ISO8601.")
@@ -148,3 +150,9 @@ class QueryReadingLatestBody(BaseModel):
                 seen.add(c)
                 out.append(c)
         return out
+
+
+class MonthlyEnergySumBody(BaseModel):
+    meter_id: int = Field(..., ge=1)
+    year: int = Field(..., ge=2000, le=2100)
+    month: int = Field(..., ge=1, le=12)

@@ -86,7 +86,7 @@ def get_all_meters_info(request: Request):
                 "type": m.type,
                 "model": m.model,
                 "survey_type": m.survey_type or [],
-                "role_id": m.role_id,
+                "role": m.role_id,
                 "source_id": m.source_id,
 
             }
@@ -135,7 +135,10 @@ def update_meter(
             meter.model = body.model
             if hasattr(body, "survey_type") and body.survey_type is not None:
                 meter.survey_type = body.survey_type
-
+            if hasattr(body, "role") and body.role is not None:
+                meter.role_id = body.role
+            if hasattr(body, "source_id"):
+                meter.source_id = body.source_id    
             session.commit()
 
         return {

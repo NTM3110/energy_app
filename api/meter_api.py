@@ -618,12 +618,8 @@ async def read_profile(request: Request, body: ReadProfileBody):
             status_code=404,
         )
 
-    survey_interval_seconds = {
-        EDMISurvey.LS01: 1800,
-        EDMISurvey.LS03: 300,
-    }.get(survey_enum, 0)
-    from_dt = datetime.combine(body.from_datetime, dt_time(0, 0, 0)) + timedelta(seconds=survey_interval_seconds)
-    to_dt = datetime.combine(body.to_datetime, dt_time(0, 0, 0)) + timedelta(days=1)
+    from_dt = body.from_datetime
+    to_dt = body.to_datetime
     print("From_dt: ", from_dt.isoformat())
     print("To_dt: ", to_dt.isoformat())
     print("Survey: ", survey_enum)
@@ -705,3 +701,4 @@ async def read_profile(request: Request, body: ReadProfileBody):
             "data": [],
         }
     )
+

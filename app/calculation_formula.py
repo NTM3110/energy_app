@@ -25,7 +25,7 @@ class PeriodResult:
 
 
 def calc_K(E: Optional[float], E_LMV: Optional[float], last_K: float) -> float:
-    if E is not None and E_LMV is not None and E > 0 and E_LMV >0:
+    if E is not None and E_LMV is not None and E > 0 and E_LMV > 0:
         return max(0.0, ((E - E_LMV) / E))
     return last_K
 

@@ -58,61 +58,6 @@ def _format_time_stamp(value: Any) -> Any:
         return dt.isoformat()
     return value
 
-# @router.post("/query_data_by_time_range")
-# def query_data_by_time_range(request: Request, body: QueryReadingByTimeRangeBody):
-#     engine = request.app.state.engine
-#     colmap: dict[str, Any] = _get_readingvalue_column_map()
-
-#     invalid = [c for c in body.columns if c not in colmap]
-#     if invalid:
-#         raise HTTPException(
-#             status_code=400,
-#             detail={"error": "invalid_columns", "invalid": invalid},
-#         )
-
-#     # SQLAlchemy 1.x ORM Query API
-#     # Always include timestamp
-#     query_cols = [ReadingValue.time_stamp_utc.label("time_stamp")]
-#     query_cols.extend(colmap[c].label(c) for c in body.columns)
-
-#     try:
-#         with Session(engine) as session:
-#             q = (
-#                 session.query(*query_cols)
-#                 .filter(ReadingValue.meter_id == body.meter_id)
-#                 .filter(ReadingValue.time_stamp_utc >= body.time_range.start_utc)
-#                 .filter(ReadingValue.time_stamp_utc < body.time_range.end_utc)
-#             )
-
-#             if body.order == "asc":
-#                 q = q.order_by(ReadingValue.time_stamp_utc.asc())
-#             else:
-#                 q = q.order_by(ReadingValue.time_stamp_utc.desc())
-
-#             q = q.limit(body.limit)
-
-#             rows = q.all()
-
-#         # rows are row-like objects with attributes matching labels
-#         data = [_build_row(getattr(r, "time_stamp"), body.columns, r) for r in rows]
-
-#         return {
-#             "meter_id": body.meter_id,
-#             "columns": body.columns,
-#             "time_range": {
-#                 "start_utc": body.time_range.start_utc,
-#                 "end_utc": body.time_range.end_utc,
-#             },
-#             "count": len(data),
-#             "data": data,
-#         }
-
-#     except HTTPException:
-#         raise
-#     except Exception:
-#         logger.error("Unhandled exception:\n%s", traceback.format_exc())
-#         raise
-
 @router.post("/query_data_by_time_range")
 def query_data_by_time_range(request: Request, body: QueryReadingByTimeRangeBody):
     engine = request.app.state.engine

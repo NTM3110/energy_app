@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request, HTTPException, Query, Depends, Response
 from sqlalchemy.orm import Session
-from sqlalchemy import extract, asc, desc, text
+from sqlalchemy import extract, asc, desc, text, func
 from typing import Optional
 from io import StringIO
 import csv
 # Import your ORM models for these tables.
 # If you don't have them yet, add them in model/models.py first.
-from model.models import MonthlyEnergySummary, MonthlyCalculationBreakdown, EnergyRole, EnergySource, ProfileReadingValue
-from schema.meter import ReadProfileBodyDb
+from model.models import MonthlyEnergySummary, MonthlyCalculationBreakdown, EnergyRole, EnergySource, ProfileReadingValue, MeterReading
+from schema.meter import ReadProfileBodyDb, MonthlyEnergySumBody
 
 router = APIRouter()
 
@@ -147,31 +147,33 @@ def get_interval_raw_csv(
 ):
     engine = request.app.state.engine
 
+    # Correct table: profile_reading_demo
+    # Correct columns: total_energy_tot_imp_wh, total_energy_tot_exp_wh
     base_sql = """
         SELECT
-            mr.ts,
+            mr.time_stamp,
 
             -- BESS
-            SUM(mr.import_kwh) FILTER (WHERE m.meter_name = 'BESS_01') AS bess_1_import,
-            SUM(mr.import_kwh) FILTER (WHERE m.meter_name = 'BESS_02') AS bess_2_import,
-            SUM(mr.export_kwh) FILTER (WHERE m.meter_name = 'BESS_01') AS bess_1_export,
-            SUM(mr.export_kwh) FILTER (WHERE m.meter_name = 'BESS_02') AS bess_2_export,
-            SUM(mr.export_kwh) FILTER (WHERE m.meter_name = 'BESS_03') AS bess_3_export,
-            SUM(mr.import_kwh) FILTER (WHERE m.meter_name = 'BESS_03') AS bess_3_import,
-            SUM(mr.export_kwh) FILTER (WHERE m.meter_name = 'BESS_04') AS bess_4_export,
-            SUM(mr.import_kwh) FILTER (WHERE m.meter_name = 'BESS_04') AS bess_4_import,
+            SUM(mr.total_energy_tot_imp_wh) FILTER (WHERE m.meter_name = 'BESS_01') AS bess_1_import,
+            SUM(mr.total_energy_tot_imp_wh) FILTER (WHERE m.meter_name = 'BESS_02') AS bess_2_import,
+            SUM(mr.total_energy_tot_exp_wh) FILTER (WHERE m.meter_name = 'BESS_01') AS bess_1_export,
+            SUM(mr.total_energy_tot_exp_wh) FILTER (WHERE m.meter_name = 'BESS_02') AS bess_2_export,
+            SUM(mr.total_energy_tot_exp_wh) FILTER (WHERE m.meter_name = 'BESS_03') AS bess_3_export,
+            SUM(mr.total_energy_tot_imp_wh) FILTER (WHERE m.meter_name = 'BESS_03') AS bess_3_import,
+            SUM(mr.total_energy_tot_exp_wh) FILTER (WHERE m.meter_name = 'BESS_04') AS bess_4_export,
+            SUM(mr.total_energy_tot_imp_wh) FILTER (WHERE m.meter_name = 'BESS_04') AS bess_4_import,
             -- RTS / SOLAR
-            SUM(mr.export_kwh) FILTER (WHERE m.meter_name = 'SOLAR_01') AS rts_1_export,
-            SUM(mr.export_kwh) FILTER (WHERE m.meter_name = 'SOLAR_02') AS rts_2_export,
-            SUM(mr.export_kwh) FILTER (WHERE m.meter_name = 'SOLAR_03') AS rts_3_export,
-            SUM(mr.export_kwh) FILTER (WHERE m.meter_name = 'SOLAR_04') AS rts_4_export,
+            SUM(mr.total_energy_tot_exp_wh) FILTER (WHERE m.meter_name = 'SOLAR_01') AS rts_1_export,
+            SUM(mr.total_energy_tot_exp_wh) FILTER (WHERE m.meter_name = 'SOLAR_02') AS rts_2_export,
+            SUM(mr.total_energy_tot_exp_wh) FILTER (WHERE m.meter_name = 'SOLAR_03') AS rts_3_export,
+            SUM(mr.total_energy_tot_exp_wh) FILTER (WHERE m.meter_name = 'SOLAR_04') AS rts_4_export,
 
             -- OTHER
-            SUM(mr.import_kwh) FILTER (WHERE m.role = 'SELF_USE') AS self_import,
-            SUM(mr.export_kwh) FILTER (WHERE m.role = 'GRID_POINT') AS grid_export,
-            SUM(mr.import_kwh) FILTER (WHERE m.role = 'INTERCONNECT') AS interconnect_import
+            SUM(mr.total_energy_tot_imp_wh) FILTER (WHERE m.role_id = 1) AS self_import,
+            SUM(mr.total_energy_tot_exp_wh) FILTER (WHERE m.role_id = 2) AS grid_export,
+            SUM(mr.total_energy_tot_imp_wh) FILTER (WHERE m.role_id = 3) AS interconnect_import
 
-        FROM meter_reading mr
+        FROM profile_reading_demo mr
         JOIN meters m ON m.id = mr.meter_id
     """
 
@@ -179,19 +181,19 @@ def get_interval_raw_csv(
     params = {}
 
     if from_ts:
-        where_clauses.append("mr.ts > :from_ts")
+        where_clauses.append("mr.time_stamp >= :from_ts")
         params["from_ts"] = from_ts
 
     if to_ts:
-        where_clauses.append("mr.ts <= :to_ts")
+        where_clauses.append("mr.time_stamp < :to_ts")
         params["to_ts"] = to_ts
 
     if where_clauses:
         base_sql += " WHERE " + " AND ".join(where_clauses)
 
     base_sql += """
-        GROUP BY mr.ts
-        ORDER BY mr.ts
+        GROUP BY mr.time_stamp
+        ORDER BY mr.time_stamp
     """
 
     with Session(engine) as session:
@@ -225,31 +227,30 @@ def get_interval_raw_csv(
     def fmt_dt(dt):
         if dt is None:
             return ""
-        val = dt.isoformat(sep=" ")
-        return f'="{val}"'
+        return dt.isoformat(sep=" ") if hasattr(dt, "isoformat") else str(dt)
 
-
+    def fmt_val(v):
+        return round(v, 3) if v is not None else 0.0
 
     for r in rows:
         writer.writerow([
-            fmt_dt(r.get("ts")),
-            r.get("bess_1_import"),
-            r.get("bess_2_import"),
-            r.get("bess_3_import"),
-            r.get("bess_4_import"),
-            r.get("bess_1_export"),
-            r.get("bess_2_export"),
-            r.get("bess_3_export"),
-            r.get("bess_4_export"),
-            r.get("rts_1_export"),
-            r.get("rts_2_export"),
-            r.get("rts_3_export"),
-            r.get("rts_4_export"),
-            r.get("self_import"),
-            r.get("grid_export"),
-            r.get("interconnect_import"),
+            fmt_dt(r.get("time_stamp")),
+            fmt_val(r.get("bess_1_import")),
+            fmt_val(r.get("bess_2_import")),
+            fmt_val(r.get("bess_3_import")),
+            fmt_val(r.get("bess_4_import")),
+            fmt_val(r.get("bess_1_export")),
+            fmt_val(r.get("bess_2_export")),
+            fmt_val(r.get("bess_3_export")),
+            fmt_val(r.get("bess_4_export")),
+            fmt_val(r.get("rts_1_export")),
+            fmt_val(r.get("rts_2_export")),
+            fmt_val(r.get("rts_3_export")),
+            fmt_val(r.get("rts_4_export")),
+            fmt_val(r.get("self_import")),
+            fmt_val(r.get("grid_export")),
+            fmt_val(r.get("interconnect_import")),
         ])
-
 
     return Response(
         content=output.getvalue(),
@@ -385,3 +386,73 @@ def get_interval_raw_json(
             "row_count": len(data),
         },
     }
+
+@router.post("/energy/monthly-sum")
+def get_monthly_sum(
+    request: Request,
+    body: MonthlyEnergySumBody
+):
+    """
+    Returns the sum of import and export kWh for a given month and meter.
+    Query table "profile_reading_demo" (MeterReading model).
+    """
+    engine = request.app.state.engine
+    with Session(engine) as session:
+        # Readings are cumulative (total energy from meter start).
+        # Monthly total = Max(reading) - Min(reading) in that month.
+        # These are in Wh, so we divide by 1000 for kWh.
+        q = (
+            session.query(
+                (func.max(MeterReading.total_energy_tot_imp_wh) - func.min(MeterReading.total_energy_tot_imp_wh)).label("total_imp_wh"),
+                (func.max(MeterReading.total_energy_tot_exp_wh) - func.min(MeterReading.total_energy_tot_exp_wh)).label("total_exp_wh"),
+            )
+            .filter(MeterReading.meter_id == body.meter_id)
+            .filter(extract("year", MeterReading.time_stamp) == body.year)
+            .filter(extract("month", MeterReading.time_stamp) == body.month)
+        )
+
+        result = q.one_or_none()
+
+        if result is None:
+            return {"import": 0.0, "export": 0.0}
+
+        total_imp_kwh = (result.total_imp_wh or 0.0) / 1000.0
+        total_exp_kwh = (result.total_exp_wh or 0.0) / 1000.0
+
+        return {
+            "import": round(total_imp_kwh, 3),
+            "export": round(total_exp_kwh, 3),
+        }
+
+@router.get("/energy/yearly-summary")
+def get_yearly_summary(
+    request: Request,
+    year: int = Query(..., ge=2000, le=2100),
+):
+    """
+    Returns monthly energy summary (BESS and RTS) for a given year.
+    Queries 'monthly_energy_summary' table.
+    """
+    engine = request.app.state.engine
+    with Session(engine) as session:
+        # Query MonthlyEnergySummary for the given year
+        items = (
+            session.query(MonthlyEnergySummary)
+            .filter(MonthlyEnergySummary.year == year)
+            .order_by(MonthlyEnergySummary.month.asc())
+            .all()
+        )
+
+        data = []
+        for item in items:
+            data.append({
+                "month": item.month,
+                "bess_to_lmv_energy_kwh": round(item.bess_to_lmv_energy_kwh or 0.0, 3),
+                "rts_to_lmv_energy_kwh": round(item.rfs_to_lmv_energy_kwh or 0.0, 3), # Mapping rfs to rts as requested
+            })
+
+        return {
+            "year": year,
+            "count": len(data),
+            "items": data,
+        }

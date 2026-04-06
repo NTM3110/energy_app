@@ -4,9 +4,10 @@ from contextlib import asynccontextmanager
 
 import redis as redis_lib
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
-from api import data_api, faults, meter_api, meter_user_api
+from api import data_api, faults, meter_api, meter_user_api, auth_api
 from app.db import engine
 from api.energy_api import router as energy_router
 from background_service.celery_app import celery_app
@@ -37,6 +38,7 @@ async def lifespan(app: FastAPI):
             print("[Auto-start] No meters found in DB, skipping meter loop.")
         else:
             existing_task_id = scheduler.get_loop_task_id()
+            
             if existing_task_id:
                 print(f"[Auto-start] Meter loop already running (task_id={existing_task_id}), skipping.")
             else:
@@ -59,9 +61,18 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Energy API", lifespan=lifespan)
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # In production, restrict this to the frontend URL
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.state.engine = engine
 app.include_router(energy_router, prefix="/api")
 app.include_router(faults.router, prefix="/api")
 app.include_router(meter_api.router, prefix="/api")
 app.include_router(meter_user_api.router, prefix="/api")
 app.include_router(data_api.router, prefix="/api")
+app.include_router(auth_api.router, prefix="/api/auth")
