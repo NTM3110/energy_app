@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
-from api import data_api, faults, meter_api, meter_user_api, auth_api
+from api import data_api, faults, meter_api, meter_user_api, auth_api, demo_data
 from app.db import engine
 from api.energy_api import router as energy_router
 from background_service.celery_app import celery_app
@@ -76,3 +76,4 @@ app.include_router(meter_api.router, prefix="/api")
 app.include_router(meter_user_api.router, prefix="/api")
 app.include_router(data_api.router, prefix="/api")
 app.include_router(auth_api.router, prefix="/api/auth")
+# app.include_router(demo_data.router, prefix="/api")
